@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Converter Instantly — Currency Multi Table Sortable</title>
+<style>
+:root{
+  --bg:#fff; --card:#f7f8fa; --text:#0f1722; --muted:#65717a; --accent:#0066ff;
+  font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;display:flex;align-items:center;justify-content:center;padding:32px;background:#fbfcfe;color:var(--text)}
+.container{width:100%;max-width:900px;background:var(--card);border-radius:12px;padding:28px;box-shadow:0 10px 30px rgba(15,23,34,0.08)}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),#00a3ff);color:white;font-weight:700;font-size:18px;box-shadow:0 6px 18px rgba(0,102,255,0.12)}
+h1{font-size:18px;margin:0}
+p.lead{margin:0;color:var(--muted);font-size:13px}
+.card{background:transparent;border-radius:10px;padding:18px;display:grid;grid-template-columns:1fr 250px;gap:12px;align-items:start}
+@media(max-width:700px){.card{grid-template-columns:1fr}}
+.controls{display:flex;flex-direction:column;gap:12px}
+label{font-size:12px;color:var(--muted)}
+input[type="number"], select{width:100%;padding:12px;border-radius:8px;border:1px solid rgba(15,23,34,0.06);background:white;font-size:16px;outline:none}
+.small-btn{padding:10px 12px;border-radius:8px;border:none;background:#0f1722;color:white;cursor:pointer;font-weight:600}
+.swap{background:transparent;border:1px dashed rgba(15,23,34,0.06);padding:8px;border-radius:8px;cursor:pointer}
+.result{background:linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.4));border-radius:8px;padding:14px;border:1px solid rgba(15,23,34,0.03);overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px;text-align:left;border-bottom:1px solid rgba(15,23,34,0.08)}
+th{cursor:pointer;color:var(--accent);font-weight:600;user-select:none;position:relative}
+th .sort-indicator{margin-left:4px;font-size:10px}
+td button.copy-btn{padding:4px 8px;background:var(--accent);border:none;color:white;border-radius:6px;cursor:pointer;font-size:12px}
+.footer{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font-size:12px;color:var(--muted)}
+.spinner{width:18px;height:18px;border-radius:50%;border:3px solid rgba(0,0,0,0.07);border-top-color:var(--accent);animation:spin .9s linear infinite;display:inline-block;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+a.inline{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+  <div class="brand">
+    <div class="logo">CI</div>
+    <div>
+      <h1>Converter Instantly</h1>
+      <p class="lead">Convert to multiple currencies — sortable table view with copy!</p>
+    </div>
+  </div>
+  <div class="meta">Rates from <a class="inline" href="https://exchangerate.host" target="_blank" rel="noopener">exchangerate.host</a></div>
+</header>
+
+<section class="card">
+  <div class="controls">
+    <div>
+      <label for="amount">Amount</label>
+      <input id="amount" type="number" min="0" step="any" value="1" inputmode="decimal">
+    </div>
+    <div>
+      <label for="from">From</label>
+      <select id="from"></select>
+    </div>
+    <div>
+      <label for="to">To (multiple)</label>
+      <select id="to" multiple size="6" style="height:auto;"></select>
+      <small class="meta">Hold Ctrl/Cmd to select multiple</small>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <button id="convertBtn" class="small-btn">Convert</button>
+      <button id="swapBtn" class="swap">⇄ Swap</button>
+      <div id="busy" style="margin-left:auto;display:none"><span class="spinner"></span></div>
+    </div>
+  </div>
+
+  <div class="result" aria-live="polite" id="results">
+    <div class="meta">Converted amounts</div>
+    <div id="outTableContainer"></div>
+  </div>
+</section>
+
+<div class="footer">
+  <div>Client-side demo — no server required.</div>
+</div>
+</div>
+
+<script>
+const API_BASE = 'https://api.exchangerate.host';
+const amountInput = document.getElementById('amount');
+const fromSelect = document.getElementById('from');
+const toSelect = document.getElementById('to');
+const convertBtn = document.getElementById('convertBtn');
+const outTableContainer = document.getElementById('outTableContainer');
+const busy = document.getElementById('busy');
+const swapBtn = document.getElementById('swapBtn');
+
+let currentData = []; // store conversion results for sorting
+let sortState = {column:null,asc:true};
+
+function setBusy(state){
+  busy.style.display = state?'block':'none';
+  convertBtn.disabled = state;
+}
+
+async function loadSymbols(){
+  try{
+    const res = await fetch(API_BASE+'/symbols');
+    if(!res.ok) throw new Error('Failed symbols');
+    const data = await res.json();
+    const symbols = data.symbols||{};
+    const codes = Object.keys(symbols).sort();
+    for(const code of codes){
+      const opt = document.createElement('option');
+      opt.value=code;
+      opt.textContent=code+' — '+(symbols[code].description||'');
+      fromSelect.appendChild(opt.cloneNode(true));
+      toSelect.appendChild(opt.cloneNode(true));
+    }
+    fromSelect.value='USD';
+    toSelect.value='EUR';
+  }catch(e){
+    console.error('Load symbols failed',e);
+    ['USD','EUR','GBP','JPY','AUD','CAD','CHF','CNY'].forEach(code=>{
+      const opt = document.createElement('option'); opt.value=code; opt.textContent=code;
+      fromSelect.appendChild(opt.cloneNode(true));
+      toSelect.appendChild(opt.cloneNode(true));
+    });
+  }
+}
+
+function copyToClipboard(text){
+  navigator.clipboard.writeText(text).then(()=>alert('Copied: '+text));
+}
+
+function renderTable(data){
+  outTableContainer.innerHTML='';
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  thead.innerHTML='<tr><th data-key="currency">Currency <span class="sort-indicator"></span></th>'+
+                  '<th data-key="converted">Converted Amount <span class="sort-indicator"></span></th>'+
+                  '<th data-key="rate">Rate <span class="sort-indicator"></span></th>'+
+                  '<th>Copy</th></tr>';
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+
+  data.forEach(row=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML=`<td>${row.currency}</td>
+                    <td>${row.converted}</td>
+                    <td>1 ${row.from} = ${row.rate}</td>
+                    <td><button class="copy-btn">Copy</button></td>`;
+    tr.querySelector('.copy-btn').addEventListener('click',()=>copyToClipboard(row.converted+' '+row.currency));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  outTableContainer.appendChild(table);
+
+  // Add sorting events
+  thead.querySelectorAll('th[data-key]').forEach(th=>{
+    th.onclick=()=>sortTable(th.dataset.key);
+    const indicator = th.querySelector('.sort-indicator');
+    if(sortState.column===th.dataset.key){
+      indicator.textContent = sortState.asc ? '▲' : '▼';
+    } else {
+      indicator.textContent = '';
+    }
+  });
+}
+
+function sortTable(key){
+  if(sortState.column===key) sortState.asc=!sortState.asc;
+  else { sortState.column=key; sortState.asc=true; }
+
+  currentData.sort((a,b)=>{
+    if(key==='converted' || key==='rate'){
+      return sortState.asc ? a[key]-b[key] : b[key]-a[key];
+    } else { // currency
+      return sortState.asc ? a[key].localeCompare(b[key]) : b[key].localeCompare(a[key]);
+    }
+  });
+  renderTable(currentData);
+}
+
+async function convert(){
+  const amount = parseFloat(amountInput.value||'0');
+  const from = fromSelect.value;
+  const targets = Array.from(toSelect.selectedOptions).map(o=>o.value);
+  if(!from || targets.length===0) return;
+  setBusy(true);
+  outTableContainer.innerHTML='';
+
+  try{
+    const symbolsParam = targets.join(',');
+    const url = `${API_BASE}/latest?base=${encodeURIComponent(from)}&symbols=${encodeURIComponent(symbolsParam)}`;
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('Failed conversion');
+    const data = await res.json();
+    const date = data.date||'—';
+    currentData = [];
+
+    for(const [cur,rate] of Object.entries(data.rates)){
+      currentData.push({
+        currency:cur,
+        converted:(amount*rate).toLocaleString(undefined,{maximumFractionDigits:6}),
+        rate:rate,
+        from:from,
+        date:date
+      });
+    }
+    sortState.column=null; // reset sort
+    renderTable(currentData);
+  }catch(e){
+    console.error('Convert failed',e);
+    outTableContainer.textContent='Error fetching rates';
+  }finally{
+    setBusy(false);
+  }
+}
+
+swapBtn.addEventListener('click', ()=>{
+  const from = fromSelect.value;
+  const toOpts = Array.from(toSelect.selectedOptions);
+  if(toOpts.length>0){
+    fromSelect.value=toOpts[0].value;
+    toOpts[0].value=from;
+  }
+  convert();
+});
+
+[amountInput, fromSelect, toSelect].forEach(el=>{
+  el.addEventListener('keydown', e=>{if(e.key==='Enter') convert();});
+});
+
+convertBtn.addEventListener('click', convert);
+
+(async function init(){
+  setBusy(true);
+  await loadSymbols();
+  setBusy(false);
+  convert();
+})();
+</script>
+</body>
+</html>
